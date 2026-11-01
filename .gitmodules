@@ -1,0 +1,9 @@
+[submodule "extern/sdl3"]
+	path = extern/sdl3
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "extern/volk"]
+	path = extern/volk
+	url = https://github.com/zeux/volk.git
+[submodule "extern/vma"]
+	path = extern/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+LineEnding: LF
+BinPackParameters: false
+BinPackArguments: false
+ColumnLimit: 0
+AllowShortIfStatementsOnASingleLine: true
+AllowShortBlocksOnASingleLine: true
+AllowShortLoopsOnASingleLine: true
