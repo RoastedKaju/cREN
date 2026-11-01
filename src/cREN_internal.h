@@ -28,4 +28,14 @@ typedef struct cREN_Device {
 typedef struct cREN_Swapchain {
   VkSwapchainKHR handle;
   VkSurfaceKHR surface;
+  VkFormat format;
+  VkColorSpaceKHR color_space;
+  VkExtent2D extent;
+  uint32_t image_count;
+  VkImage *images;
+  VkImageView *views;
+  bool vsync;
+  // last requested size, fallback when surface has no fixed extent
+  uint32_t width;
+  uint32_t height;
 } cREN_Swapchain;

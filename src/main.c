@@ -2,6 +2,7 @@
 #include "cREN_device.h"
 #include "cREN_instance.h"
 #include "cREN_surface.h"
+#include "cREN_swapchain.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -26,7 +27,7 @@ static void destroy_vulkan_surface(void *instance, void *surface, void *data) {
 
 int main() {
   SDL_Init(SDL_INIT_VIDEO);
-  SDL_Window *window = SDL_CreateWindow("Application", 800, 600, SDL_WINDOW_VULKAN);
+  SDL_Window *window = SDL_CreateWindow("Application", 800, 600, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
   Uint32 ext_count = 0;
   const char *const *exts = SDL_Vulkan_GetInstanceExtensions(&ext_count);
 
@@ -59,7 +60,46 @@ int main() {
   // device
   cREN_Device *device = cREN_device_init(ctx);
 
+  // swapchain
+  int width = 0, height = 0;
+  SDL_GetWindowSizeInPixels(window, &width, &height);
+  cREN_SwapchainDesc swapchain_desc = {
+      .width = (uint32_t)width,
+      .height = (uint32_t)height,
+      .vsync = true,
+  };
+  cREN_Swapchain *swapchain = cREN_swapchain_init(ctx, device, surface, &swapchain_desc);
+
+  bool running = true;
+  bool resized = false;
+
+  while (running) {
+    SDL_Event event;
+    while (SDL_PollEvent(&event)) {
+      if (event.type == SDL_EVENT_QUIT) {
+        running = false;
+      } else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+        resized = true;
+      }
+    }
+
+    if (resized) {
+      SDL_GetWindowSizeInPixels(window, &width, &height);
+      if (width > 0 && height > 0) {
+        cREN_swapchain_resize(ctx, device, swapchain, (uint32_t)width, (uint32_t)height);
+      }
+      resized = false;
+    }
+
+    // if window is minimized
+    if (width == 0 || height == 0) {
+      SDL_Delay(10);
+      continue;
+    }
+  }
+
   // clean-up
+  cREN_swapchain_deinit(ctx, device, swapchain);
   cREN_device_deinit(device);
   cREN_surface_deinit(ctx, surface);
   cREN_instance_deinit(ctx);

@@ -71,3 +71,11 @@ target_compile_definitions(cREN PRIVATE
     WIN32_LEAN_AND_MEAN=1
     NOMINMAX=1
 )
+
+# Address sanitizer
+option(CREN_ENABLE_ASAN "Enable Address Sanitizer" OFF)
+if(CREN_ENABLE_ASAN)
+    if(MSVC)
+        target_compile_options(/fsanitize=address /Zi)
+    endif()
+endif()
