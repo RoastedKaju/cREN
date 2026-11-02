@@ -231,6 +231,22 @@ cREN_Device *cREN_device_init(cREN_Context *ctx) {
 
   volkLoadDevice(device->logical);
 
+  VkSemaphoreTypeCreateInfo type_info = {
+      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+      .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+      .initialValue = 0,
+  };
+  VkSemaphoreCreateInfo sem_info = {
+      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+      .pNext = &type_info,
+  };
+  if (vkCreateSemaphore(device->logical, &sem_info, NULL, &device->timeline) != VK_SUCCESS) {
+    fprintf(stderr, "[cREN] Failed to create timeline semaphore\n");
+    vkDestroyDevice(device->logical, NULL);
+    free(device);
+    return NULL;
+  }
+
   vkGetDeviceQueue(device->logical, device->universal_family, 0, &device->universal_queue);
 
   return device;
@@ -238,6 +254,10 @@ cREN_Device *cREN_device_init(cREN_Context *ctx) {
 
 void cREN_device_deinit(cREN_Device *device) {
   if (device == NULL) { return; }
+
+  if (device->timeline != VK_NULL_HANDLE) {
+    vkDestroySemaphore(device->logical, device->timeline, NULL);
+  }
 
   if (device->logical != VK_NULL_HANDLE) {
     vkDestroyDevice(device->logical, NULL);

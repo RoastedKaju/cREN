@@ -9,7 +9,7 @@ static uint32_t fn_clamp_u32(uint32_t v, uint32_t lo, uint32_t hi) {
 }
 
 static VkExtent2D fn_choose_extent(const VkSurfaceCapabilitiesKHR *caps, uint32_t width, uint32_t height) {
-  if (caps->currentExtent.width != 0xFFFFFFFFu) {
+  if (caps->currentExtent.width != UINT32_MAX) {
     return caps->currentExtent;
   }
 
@@ -82,9 +82,23 @@ static void fn_destroy_views(VkDevice device, VkImageView *views, uint32_t count
   for (uint32_t i = 0; i < count; ++i) {
     if (views[i] != VK_NULL_HANDLE) {
       vkDestroyImageView(device, views[i], NULL);
+      views[i] = VK_NULL_HANDLE;
     }
   }
   free(views);
+}
+
+static void fn_destroy_semaphores(VkDevice device, VkSemaphore *semaphores, uint32_t count) {
+  if (semaphores == NULL) {
+    return;
+  }
+
+  for (uint32_t i = 0; i < count; ++i) {
+    if (semaphores[i] != VK_NULL_HANDLE) {
+      vkDestroySemaphore(device, semaphores[i], NULL);
+    }
+  }
+  free(semaphores);
 }
 
 /**
@@ -103,7 +117,7 @@ static bool fn_swapchain_build(cREN_Device *device, cREN_Swapchain *sc) {
   }
 
   // extent
-  VkExtent2D extent = fn_choose_extent(&caps, sc->width, sc->height);
+  VkExtent2D extent = fn_choose_extent(&caps, sc->requested_extent.width, sc->requested_extent.height);
   if (extent.width == 0 || extent.height == 0) {
     return true;
   }
@@ -183,7 +197,17 @@ static bool fn_swapchain_build(cREN_Device *device, cREN_Swapchain *sc) {
   }
   vkGetSwapchainImagesKHR(logical_device, new_handle, &actual_count, images);
 
+  // semaphores
+  VkSemaphore *render_finished = calloc(actual_count, sizeof(*render_finished));
+  if (render_finished == NULL) {
+    fn_destroy_views(logical_device, views, actual_count);
+    free(images);
+    vkDestroySwapchainKHR(logical_device, new_handle, NULL);
+    return false;
+  }
+
   for (uint32_t i = 0; i < actual_count; ++i) {
+    // create image views
     VkImageViewCreateInfo view_info = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
         .image = images[i],
@@ -203,15 +227,28 @@ static bool fn_swapchain_build(cREN_Device *device, cREN_Swapchain *sc) {
       return false;
     }
   }
+  // per image render finished semaphore
+  VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  for (uint32_t i = 0; i < actual_count; ++i) {
+    if (vkCreateSemaphore(logical_device, &sem_info, NULL, &render_finished[i]) != VK_SUCCESS) {
+      fn_destroy_semaphores(logical_device, render_finished, actual_count);
+      fn_destroy_views(logical_device, views, actual_count);
+      free(images);
+      vkDestroySwapchainKHR(logical_device, new_handle, NULL);
+      return false;
+    }
+  }
 
   // retire old swapchain
   VkSwapchainKHR old_handle = sc->handle;
   VkImageView *old_views = sc->views;
   uint32_t old_count = sc->image_count;
   VkImage *old_images = sc->images;
+  VkSemaphore *old_render_finished = sc->render_finished;
 
   if (old_handle != VK_NULL_HANDLE) {
     vkDeviceWaitIdle(logical_device);
+    fn_destroy_semaphores(logical_device, old_render_finished, old_count);
     fn_destroy_views(logical_device, old_views, old_count);
     free(old_images);
     vkDestroySwapchainKHR(logical_device, old_handle, NULL);
@@ -224,12 +261,15 @@ static bool fn_swapchain_build(cREN_Device *device, cREN_Swapchain *sc) {
   sc->image_count = actual_count;
   sc->images = images;
   sc->views = views;
+  sc->needs_resize = false;
+  sc->render_finished = render_finished;
   return true;
 }
 
 cREN_Swapchain *cREN_swapchain_init(cREN_Context *ctx, cREN_Device *device, cREN_Surface *surface, const cREN_SwapchainDesc *const desc) {
   if (ctx == NULL || device == NULL || surface == NULL || desc == NULL ||
-      device->logical == VK_NULL_HANDLE || surface->handle == VK_NULL_HANDLE) {
+      device->logical == VK_NULL_HANDLE || surface->handle == VK_NULL_HANDLE ||
+      desc->frame_count == 0) {
     return NULL;
   }
 
@@ -247,12 +287,30 @@ cREN_Swapchain *cREN_swapchain_init(cREN_Context *ctx, cREN_Device *device, cREN
     return NULL;
   }
   sc->surface = vk_surface;
-  sc->width = desc->width;
-  sc->height = desc->height;
+  sc->requested_extent.width = desc->width;
+  sc->requested_extent.height = desc->height;
   sc->vsync = desc->vsync;
+
+  sc->acquires = calloc(desc->frame_count, sizeof(*sc->acquires));
+  if (sc->acquires == NULL) {
+    free(sc);
+    return NULL;
+  }
+  sc->acquire_count = desc->frame_count;
+
+  VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  for (uint32_t i = 0; i < sc->acquire_count; ++i) {
+    if (vkCreateSemaphore(device->logical, &sem_info, NULL, &sc->acquires[i]) != VK_SUCCESS) {
+      fprintf(stderr, "[cREN] Swapchain creation failed\n");
+      fn_destroy_semaphores(device->logical, sc->acquires, sc->acquire_count);
+      free(sc);
+      return NULL;
+    }
+  }
 
   if (!fn_swapchain_build(device, sc) || sc->handle == VK_NULL_HANDLE) {
     fprintf(stderr, "[cREN] Swapchain creation failed\n");
+    fn_destroy_semaphores(device->logical, sc->acquires, sc->acquire_count);
     free(sc);
     return NULL;
   }
@@ -266,8 +324,8 @@ bool cREN_swapchain_resize(cREN_Context *ctx, cREN_Device *device, cREN_Swapchai
     return false;
   }
 
-  sc->width = width;
-  sc->height = height;
+  sc->requested_extent.width = width;
+  sc->requested_extent.height = height;
 
   return fn_swapchain_build(device, sc);
 }
@@ -278,10 +336,26 @@ void cREN_swapchain_deinit(cREN_Context *ctx, cREN_Device *device, cREN_Swapchai
   }
 
   vkDeviceWaitIdle(device->logical);
+
+  fn_destroy_semaphores(device->logical, sc->render_finished, sc->image_count);
+
   fn_destroy_views(device->logical, sc->views, sc->image_count);
+
   free(sc->images);
+
+  fn_destroy_semaphores(device->logical, sc->acquires, sc->acquire_count);
+
   if (sc->handle != VK_NULL_HANDLE) {
     vkDestroySwapchainKHR(device->logical, sc->handle, NULL);
+    sc->handle = VK_NULL_HANDLE;
   }
   free(sc);
+}
+
+bool cREN_swapchain_needs_resize(const cREN_Swapchain *sc) {
+  return sc != NULL && sc->needs_resize;
+}
+
+cREN_Format cREN_swapchain_format(const cREN_Swapchain *sc) {
+  return sc != NULL ? fn_format_from_vk(sc->format) : CREN_FORMAT_UNDEFINED;
 }

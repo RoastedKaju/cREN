@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 project(cRenderer LANGUAGES C CXX)
 
+find_package(Vulkan REQUIRED)
+find_program(SLANGC slangc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" REQUIRED)
+
 add_executable(cREN)
 
 file(GLOB_RECURSE cREN_SOURCES "src/*.c" "src/*.cpp")
@@ -41,7 +44,6 @@ add_subdirectory(extern/sdl3 EXCLUDE_FROM_ALL)
 set(VOLK_PULL_IN_VULKAN ON CACHE BOOL "" FORCE)
 set(VOLK_INSTALL OFF CACHE BOOL "" FORCE)
 set(VOLK_HEADERS_ONLY OFF CACHE BOOL "" FORCE)
-find_package(Vulkan REQUIRED)
 
 if(WIN32)
     set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR CACHE STRING "" FORCE)
@@ -70,12 +72,29 @@ target_compile_definitions(cREN PRIVATE
     VK_NO_PROTOTYPES=1
     WIN32_LEAN_AND_MEAN=1
     NOMINMAX=1
+    CREN_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
 )
 
 # Address sanitizer
 option(CREN_ENABLE_ASAN "Enable Address Sanitizer" OFF)
+
 if(CREN_ENABLE_ASAN)
     if(MSVC)
         target_compile_options(/fsanitize=address /Zi)
     endif()
 endif()
+
+# Compile shaders
+set(CREN_SHADER_SRC "${CMAKE_SOURCE_DIR}/shaders/triangle.slang")
+set(CREN_SHADER_OUT "${CMAKE_BINARY_DIR}/shaders/triangle.spv")
+
+add_custom_command(
+    OUTPUT "${CREN_SHADER_OUT}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
+    COMMAND ${SLANGC} "${CREN_SHADER_SRC}" -target spirv -profile spirv_1_5 -o "${CREN_SHADER_OUT}"
+    DEPENDS "${CREN_SHADER_SRC}"
+    COMMENT "Compiling triangle.slang"
+    VERBATIM
+)
+add_custom_target(cREN_shaders DEPENDS "${CREN_SHADER_OUT}")
+add_dependencies(cREN cREN_shaders)
