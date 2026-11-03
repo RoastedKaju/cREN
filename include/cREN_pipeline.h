@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cREN_bindless.h"
 #include "cREN_context.h"
 #include "cREN_device.h"
 #include "cREN_shader.h"
@@ -19,7 +20,8 @@ typedef struct cREN_PipelineDesc {
   cREN_Format depth_format; // UNDEFINED = no depth attachment
   bool depth_test;
   bool depth_write;
-  uint32_t push_constant_size; // 128 max
+  uint32_t push_constant_size;   // 128 max
+  const cREN_Bindless *bindless; // optional, becomes set 0 of the layout
 } cREN_PipelineDesc;
 
 cREN_Pipeline *cREN_pipeline_init(cREN_Context *ctx, cREN_Device *device, const cREN_PipelineDesc *desc);

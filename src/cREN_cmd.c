@@ -305,3 +305,10 @@ void cREN_cmd_draw_indexed(cREN_CmdBuffer *cmd, uint32_t index_count, uint32_t i
   }
   vkCmdDrawIndexed(cmd->handle, index_count, instance_count, first_index, vertex_offset, first_instance);
 }
+
+void cREN_cmd_bind_bindless(cREN_CmdBuffer *cmd, const cREN_Pipeline *pipeline, const cREN_Bindless *bindless) {
+  if (cmd == NULL || pipeline == NULL || bindless == NULL) {
+    return;
+  }
+  vkCmdBindDescriptorSets(cmd->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline->layout, 0, 1, &bindless->set, 0, NULL);
+}

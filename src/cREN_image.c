@@ -73,7 +73,7 @@ cREN_Image *cREN_image_create(cREN_Context *ctx, cREN_Device *device, cREN_Alloc
 
   const uint32_t max_mips = fn_mip_count(desc->width, desc->height, depth_px);
   uint32_t mips = 1;
-  if (desc->mip_levels == UINT32_MAX) {
+  if (desc->mip_levels == CREN_MAX_MIP_LEVELS) {
     mips = max_mips;
   } else if (desc->mip_levels != 0) {
     if (desc->mip_levels > max_mips) {
@@ -95,6 +95,7 @@ cREN_Image *cREN_image_create(cREN_Context *ctx, cREN_Device *device, cREN_Alloc
   image->type = type;
   image->aspect = depth_format ? (VK_IMAGE_ASPECT_DEPTH_BIT | (fn_has_stencil(format) ? VK_IMAGE_ASPECT_STENCIL_BIT : 0))
                                : VK_IMAGE_ASPECT_COLOR_BIT;
+  image->usage = desc->usage;
 
   VkImageCreateInfo image_info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -224,6 +225,7 @@ cREN_ImageView *cREN_image_view_create(cREN_Context *ctx, cREN_Device *device, c
   }
   view->type = type;
   view->image = image;
+  view->kind = desc->type;
 
   VkImageViewCreateInfo info = {
       .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,

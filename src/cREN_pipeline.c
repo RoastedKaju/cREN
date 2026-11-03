@@ -49,8 +49,11 @@ cREN_Pipeline *cREN_pipeline_init(cREN_Context *ctx, cREN_Device *device, const 
       .size = desc->push_constant_size,
   };
 
+  VkDescriptorSetLayout set_layout = desc->bindless != NULL ? desc->bindless->layout : VK_NULL_HANDLE;
   VkPipelineLayoutCreateInfo layout_info = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .setLayoutCount = desc->bindless != NULL ? 1 : 0,
+      .pSetLayouts = &set_layout,
       .pushConstantRangeCount = desc->push_constant_size != 0 ? 1 : 0,
       .pPushConstantRanges = &push_range,
   };

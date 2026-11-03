@@ -85,6 +85,7 @@ static bool fn_has_required_features(VkPhysicalDevice device, uint32_t api_ver) 
   vkGetPhysicalDeviceFeatures2(device, &features_2);
 
   return features_2.features.samplerAnisotropy &&
+         features_2.features.shaderSampledImageArrayDynamicIndexing &&
          features_11.shaderDrawParameters &&
          features_12.timelineSemaphore &&
          features_12.bufferDeviceAddress &&
@@ -209,6 +210,7 @@ cREN_Device *cREN_device_init(cREN_Context *ctx) {
       .pNext = &features_11,
       .features = {
           .samplerAnisotropy = VK_TRUE,
+          .shaderSampledImageArrayDynamicIndexing = VK_TRUE,
       },
   };
 

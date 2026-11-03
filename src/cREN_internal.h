@@ -164,14 +164,30 @@ typedef struct cREN_Image {
   cREN_ImageType type;
   VkImageAspectFlags aspect; // for barriers, depth plus stencil for combined formats
   cREN_ImageState state;     // whole-image state, tracked at record time
+  cREN_ImageUsage usage;
 } cREN_Image;
 
-struct cREN_ImageView {
+typedef struct cREN_ImageView {
   VkImageView handle;
   VkImageViewType type;
   const cREN_Image *image; // descriptors will need the image's usage and format
-};
+  cREN_ImageViewType kind; // our own type, which doubles as the bindless table index
+} cREN_ImageView;
 
-struct cREN_Sampler {
+typedef struct cREN_Sampler {
   VkSampler handle;
-};
+} cREN_Sampler;
+
+typedef struct cREN_BindlessTable {
+  uint32_t capacity;
+  uint32_t *free_stack;
+  uint32_t free_count;
+} cREN_BindlessTable;
+
+typedef struct cREN_Bindless {
+  VkDevice logical;
+  VkDescriptorSetLayout layout;
+  VkDescriptorPool pool;
+  VkDescriptorSet set;
+  cREN_BindlessTable tables[CREN_TABLE_COUNT];
+} cREN_Bindless;

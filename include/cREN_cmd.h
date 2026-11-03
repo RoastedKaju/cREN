@@ -56,3 +56,5 @@ void cREN_cmd_push_constants(cREN_CmdBuffer *cmd, const cREN_Pipeline *pipeline,
 void cREN_cmd_bind_index_buffer(cREN_CmdBuffer *cmd, const cREN_Buffer *buffer, uint64_t offset);
 
 void cREN_cmd_draw_indexed(cREN_CmdBuffer *cmd, uint32_t index_count, uint32_t instance_count, uint32_t first_index, int32_t vertex_offset, uint32_t first_instance);
+
+void cREN_cmd_bind_bindless(cREN_CmdBuffer *cmd, const cREN_Pipeline *pipeline, const cREN_Bindless *bindless);

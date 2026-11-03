@@ -2,6 +2,9 @@
 
 #include <stdbool.h>
 
+#define CREN_MAX_MIP_LEVELS UINT32_MAX
+#define CREN_BINDLESS_INVALID UINT32_MAX
+
 /* function pointer type for surface creation */
 typedef bool (*cREN_SurfaceCreateFn)(void *renderer_instance,
                                      void *native_window,
@@ -114,4 +117,12 @@ typedef enum cREN_BorderColor {
   CREN_BORDER_OPAQUE_WHITE,
 } cREN_BorderColor;
 
-
+typedef enum cREN_BindlessTableType {
+  CREN_TABLE_2D = 0, // these five match cREN_ImageViewType's order exactly
+  CREN_TABLE_2D_ARRAY,
+  CREN_TABLE_CUBE,
+  CREN_TABLE_CUBE_ARRAY,
+  CREN_TABLE_3D,
+  CREN_TABLE_SAMPLER,
+  CREN_TABLE_COUNT, // one binding per table
+} cREN_BindlessTableType;

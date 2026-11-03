@@ -17,7 +17,6 @@
 #include <stdio.h>
 
 // TODO: Pass the descriptors using const * as well as it will be good later on when desiging ABI for C#
-// TODO: Look into images and see if views can be independent from images like a image can have multiple views
 
 static bool create_vulkan_surface(void *instance, void *window, void *data, void **surface) {
   (void)data;
@@ -77,6 +76,10 @@ int main() {
 
   // device
   cREN_Device *device = cREN_device_init(ctx);
+
+  // bindless table
+  cREN_BindlessDesc bl_desc = {0}; // defaults
+  cREN_Bindless *bindless = cREN_bindless_init(ctx, device, &bl_desc);
 
   // shader
   cREN_Shader *shader = cREN_shader_load(ctx, device, CREN_SHADER_DIR "/triangle.spv");
@@ -148,12 +151,15 @@ int main() {
       .format = CREN_FORMAT_RGBA8_UNORM,
       .usage = CREN_IMAGE_SAMPLED | CREN_IMAGE_TRANSFER_DST,
       .type = CREN_IMAGE_TYPE_CUBE,
-      .mip_levels = UINT32_MAX,
+      .mip_levels = CREN_MAX_MIP_LEVELS,
   };
   cREN_Image *sky = cREN_image_create(ctx, device, allocator, &sky_desc);
 
   cREN_ImageViewDesc face_desc = {.type = CREN_VIEW_2D, .base_mip = 0, .mip_count = 1, .base_layer = 2, .layer_count = 1};
   cREN_ImageView *face = cREN_image_view_create(ctx, device, sky, &face_desc);
+
+  cREN_ImageViewDesc cube_desc = {.type = CREN_VIEW_CUBE}; // all mips, all 6 faces
+  cREN_ImageView *cube_view = cREN_image_view_create(ctx, device, sky, &cube_desc);
 
   cREN_SamplerDesc sampler_desc = {
       .min_filter = CREN_FILTER_LINEAR,
@@ -165,6 +171,11 @@ int main() {
       .max_anisotropy = 16.0f,
   };
   cREN_Sampler *sampler = cREN_sampler_create(ctx, device, &sampler_desc);
+
+  uint32_t cube_slot = cREN_bindless_add_image(bindless, cube_view);
+  uint32_t face_slot = cREN_bindless_add_image(bindless, face); // 2D table, so slot 0
+  uint32_t smp_slot = cREN_bindless_add_sampler(bindless, sampler);
+  fprintf(stderr, "[cREN] bindless: cube %u, face %u, sampler %u\n", cube_slot, face_slot, smp_slot);
 
   bool running = true;
 
@@ -235,6 +246,7 @@ int main() {
   // clean-up
   cREN_frames_deinit(ctx, device, frames);
   cREN_image_view_destroy(ctx, device, face);
+  cREN_image_view_destroy(ctx, device, cube_view);
   cREN_image_destroy(ctx, device, allocator, sky);
   cREN_sampler_destroy(ctx, device, sampler);
   cREN_image_destroy(ctx, device, allocator, depth);
@@ -245,6 +257,7 @@ int main() {
   cREN_surface_deinit(ctx, surface);
   cREN_allocator_deinit(allocator);
   cREN_shader_deinit(ctx, device, shader);
+  cREN_bindless_deinit(ctx, device, bindless);
   cREN_device_deinit(device);
   cREN_instance_deinit(ctx);
   cREN_context_deinit(ctx);

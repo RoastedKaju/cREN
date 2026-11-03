@@ -1,3 +1,16 @@
+[[vk::binding(0, 0)]]
+Texture2D textures2D[];
+[[vk::binding(1, 0)]]
+Texture2DArray textures2DArray[];
+[[vk::binding(2, 0)]]
+TextureCube texturesCube[];
+[[vk::binding(3, 0)]]
+TextureCubeArray texturesCubeArray[];
+[[vk::binding(4, 0)]]
+Texture3D textures3D[];
+[[vk::binding(5, 0)]]
+SamplerState samplers[];
+
 struct Vertex {
   float3 position;
   float3 color;
