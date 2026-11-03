@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// TODO: Pass the descriptors using const * as well as it will be good later on when desiging ABI for C#
+
 
 typedef struct cREN_Swapchain cREN_Swapchain;
 
@@ -28,3 +28,5 @@ void cREN_swapchain_deinit(cREN_Context *ctx, cREN_Device *device, cREN_Swapchai
 bool cREN_swapchain_needs_resize(const cREN_Swapchain *sc);
 
 cREN_Format cREN_swapchain_format(const cREN_Swapchain *sc);
+
+void cREN_swapchain_extent(const cREN_Swapchain *sc, uint32_t *width, uint32_t *height);

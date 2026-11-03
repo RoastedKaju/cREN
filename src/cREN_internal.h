@@ -112,6 +112,8 @@ typedef struct cREN_Swapchain {
 typedef struct cREN_CmdBuffer {
   VkCommandBuffer handle;
   bool recorded;
+  VkRenderingAttachmentInfo *color_infos;
+  uint32_t color_cap;
 } cREN_CmdBuffer;
 
 typedef struct cREN_FrameSlot {
@@ -149,3 +151,27 @@ typedef struct cREN_Pipeline {
   VkPipelineLayout layout;
   VkShaderStageFlags push_stages;
 } cREN_Pipeline;
+
+typedef struct cREN_Image {
+  VkImage handle;
+  VkImageView view; // default view, used when the image is a render attachment
+  VmaAllocation allocation;
+  VkFormat format;
+  VkExtent2D extent;
+  uint32_t depth; // 1 unless 3D
+  uint32_t mip_levels;
+  uint32_t array_layers; // faces included for cubes
+  cREN_ImageType type;
+  VkImageAspectFlags aspect; // for barriers, depth plus stencil for combined formats
+  cREN_ImageState state;     // whole-image state, tracked at record time
+} cREN_Image;
+
+struct cREN_ImageView {
+  VkImageView handle;
+  VkImageViewType type;
+  const cREN_Image *image; // descriptors will need the image's usage and format
+};
+
+struct cREN_Sampler {
+  VkSampler handle;
+};

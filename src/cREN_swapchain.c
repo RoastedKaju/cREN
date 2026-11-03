@@ -359,3 +359,11 @@ bool cREN_swapchain_needs_resize(const cREN_Swapchain *sc) {
 cREN_Format cREN_swapchain_format(const cREN_Swapchain *sc) {
   return sc != NULL ? fn_format_from_vk(sc->format) : CREN_FORMAT_UNDEFINED;
 }
+
+void cREN_swapchain_extent(const cREN_Swapchain *sc, uint32_t *width, uint32_t *height) {
+  if (sc == NULL || width == NULL || height == NULL) {
+    return;
+  }
+  *width = sc->extent.width;
+  *height = sc->extent.height;
+}

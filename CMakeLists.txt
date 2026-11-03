@@ -98,3 +98,7 @@ add_custom_command(
 )
 add_custom_target(cREN_shaders DEPENDS "${CREN_SHADER_OUT}")
 add_dependencies(cREN cREN_shaders)
+
+# if(MSVC)
+#     target_compile_options(cREN PRIVATE /W4 /we4013)
+# endif()

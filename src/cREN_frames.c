@@ -8,6 +8,7 @@ static void fn_destroy_slots(VkDevice device, cREN_FrameSlot *slots, uint32_t co
   for (uint32_t i = 0; i < count; ++i) {
     if (slots[i].pool != VK_NULL_HANDLE) {
       vkDestroyCommandPool(device, slots[i].pool, NULL); // also frees its command buffer
+      free(slots[i].cmd.color_infos);
     }
   }
 }

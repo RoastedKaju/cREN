@@ -4,8 +4,10 @@
 #include "cREN_context.h"
 #include "cREN_device.h"
 #include "cREN_frames.h"
+#include "cREN_image.h"
 #include "cREN_instance.h"
 #include "cREN_pipeline.h"
+#include "cREN_sampler.h"
 #include "cREN_shader.h"
 #include "cREN_surface.h"
 #include "cREN_swapchain.h"
@@ -13,6 +15,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdio.h>
+
+// TODO: Pass the descriptors using const * as well as it will be good later on when desiging ABI for C#
+// TODO: Look into images and see if views can be independent from images like a image can have multiple views
 
 static bool create_vulkan_surface(void *instance, void *window, void *data, void **surface) {
   (void)data;
@@ -41,9 +46,9 @@ typedef struct PushConstants {
 } PushConstants;
 
 Vertex vertices[3] = {
-    {{0.0f, -0.5f, 0.0f}, {1, 0, 0}},
-    {{0.5f, 0.5f, 0.0f}, {0, 1, 0}},
-    {{-0.5f, 0.5f, 0.0f}, {0, 0, 1}},
+    {{0.0f, -0.5f, 0.5f}, {1, 0, 0}},
+    {{0.5f, 0.5f, 0.5f}, {0, 1, 0}},
+    {{-0.5f, 0.5f, 0.5f}, {0, 0, 1}},
 };
 uint32_t indices[3] = {0, 1, 2};
 
@@ -105,6 +110,12 @@ int main() {
   };
   cREN_Swapchain *swapchain = cREN_swapchain_init(ctx, device, surface, &swapchain_desc);
 
+  // depth image
+  uint32_t sw = 0, sh = 0;
+  cREN_swapchain_extent(swapchain, &sw, &sh);
+  cREN_ImageDesc depth_desc = {sw, sh, CREN_FORMAT_D32_FLOAT, CREN_IMAGE_DEPTH_ATTACHMENT};
+  cREN_Image *depth = cREN_image_create(ctx, device, allocator, &depth_desc);
+
   // upload data in buffers
   cREN_BufferDesc vb_desc = {sizeof(vertices), CREN_BUFFER_STORAGE | CREN_BUFFER_TRANSFER_DST, CREN_MEMORY_GPU_ONLY};
   cREN_BufferDesc ib_desc = {sizeof(indices), CREN_BUFFER_INDEX | CREN_BUFFER_TRANSFER_DST, CREN_MEMORY_GPU_ONLY};
@@ -123,10 +134,37 @@ int main() {
       .frag_entry = "fsMain",
       .color_formats = &color_format,
       .color_format_count = 1,
-      .depth_format = CREN_FORMAT_UNDEFINED,
+      .depth_format = CREN_FORMAT_D32_FLOAT,
+      .depth_test = true,
+      .depth_write = true,
       .push_constant_size = sizeof(PushConstants),
   };
   cREN_Pipeline *pipeline = cREN_pipeline_init(ctx, device, &pipeline_desc);
+
+  // sky
+  cREN_ImageDesc sky_desc = {
+      .width = 256,
+      .height = 256,
+      .format = CREN_FORMAT_RGBA8_UNORM,
+      .usage = CREN_IMAGE_SAMPLED | CREN_IMAGE_TRANSFER_DST,
+      .type = CREN_IMAGE_TYPE_CUBE,
+      .mip_levels = UINT32_MAX,
+  };
+  cREN_Image *sky = cREN_image_create(ctx, device, allocator, &sky_desc);
+
+  cREN_ImageViewDesc face_desc = {.type = CREN_VIEW_2D, .base_mip = 0, .mip_count = 1, .base_layer = 2, .layer_count = 1};
+  cREN_ImageView *face = cREN_image_view_create(ctx, device, sky, &face_desc);
+
+  cREN_SamplerDesc sampler_desc = {
+      .min_filter = CREN_FILTER_LINEAR,
+      .mag_filter = CREN_FILTER_LINEAR,
+      .mip_filter = CREN_FILTER_LINEAR,
+      .address_u = CREN_ADDRESS_REPEAT,
+      .address_v = CREN_ADDRESS_REPEAT,
+      .address_w = CREN_ADDRESS_REPEAT,
+      .max_anisotropy = 16.0f,
+  };
+  cREN_Sampler *sampler = cREN_sampler_create(ctx, device, &sampler_desc);
 
   bool running = true;
 
@@ -147,7 +185,16 @@ int main() {
     if (cREN_swapchain_needs_resize(swapchain)) {
       SDL_GetWindowSizeInPixels(window, &width, &height);
       if (width > 0 && height > 0) {
-        cREN_swapchain_resize(ctx, device, swapchain, (uint32_t)width, (uint32_t)height);
+        if (cREN_swapchain_resize(ctx, device, swapchain, (uint32_t)width, (uint32_t)height)) {
+          // on successful resize, recreate depth image
+          cREN_swapchain_extent(swapchain, &sw, &sh);
+          if (sw != cREN_image_width(depth) || sh != cREN_image_height(depth)) {
+            cREN_image_destroy(ctx, device, allocator, depth);
+            depth_desc.width = sw;
+            depth_desc.height = sh;
+            depth = cREN_image_create(ctx, device, allocator, &depth_desc);
+          }
+        }
       }
     }
 
@@ -156,14 +203,27 @@ int main() {
 
       cREN_CmdBuffer *cmd = cREN_cmd_begin(frames);
       if (cmd != NULL) {
-        cREN_ClearColor clear = {0.1f, 0.2f, 0.4f, 1.0f};
-        if (cREN_cmd_begin_rendering(cmd, frames, swapchain, clear)) {
+        // can be moved outside of loop since this is just plain data
+        cREN_ColorAttachment color = {
+            .swapchain = swapchain,
+            .load = CREN_LOAD_CLEAR,
+            .clear = {0.1f, 0.2f, 0.4f, 1.0f},
+        };
+        cREN_DepthAttachment depth_att = {
+            .image = depth,
+            .load = CREN_LOAD_CLEAR,
+            .clear_depth = 1.0f,
+        };
+        cREN_RenderingDesc pass = {.colors = &color, .color_count = 1, .depth = &depth_att};
+
+        if (cREN_cmd_begin_rendering(cmd, frames, &pass)) {
           cREN_cmd_bind_pipeline(cmd, pipeline);
           cREN_cmd_set_viewport_scissor(cmd, swapchain);
           cREN_cmd_push_constants(cmd, pipeline, &push, sizeof(push));
           cREN_cmd_bind_index_buffer(cmd, index_buffer, 0);
           cREN_cmd_draw_indexed(cmd, 3, 1, 0, 0, 0);
-          cREN_cmd_end_rendering(cmd, frames, swapchain);
+          cREN_cmd_end_rendering(cmd);
+          cREN_cmd_prepare_present(cmd, frames, swapchain);
         }
         cREN_cmd_end(cmd);
       }
@@ -174,6 +234,10 @@ int main() {
 
   // clean-up
   cREN_frames_deinit(ctx, device, frames);
+  cREN_image_view_destroy(ctx, device, face);
+  cREN_image_destroy(ctx, device, allocator, sky);
+  cREN_sampler_destroy(ctx, device, sampler);
+  cREN_image_destroy(ctx, device, allocator, depth);
   cREN_buffer_destroy(ctx, allocator, index_buffer);
   cREN_buffer_destroy(ctx, allocator, vertex_buffer);
   cREN_pipeline_deinit(ctx, device, pipeline);

@@ -57,6 +57,7 @@ static inline VKAPI_ATTR VkBool32 VKAPI_CALL fn_debug_callback(VkDebugUtilsMessa
                                                                VkDebugUtilsMessageTypeFlagsEXT flags,
                                                                const VkDebugUtilsMessengerCallbackDataEXT *data,
                                                                void *user_data) {
+  (void)severity;
   (void)flags;
   (void)user_data;
 
