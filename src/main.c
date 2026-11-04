@@ -4,6 +4,7 @@
 #include "cREN_context.h"
 #include "cREN_device.h"
 #include "cREN_frames.h"
+#include "cREN_graph.h"
 #include "cREN_image.h"
 #include "cREN_instance.h"
 #include "cREN_pipeline.h"
@@ -17,6 +18,7 @@
 #include <stdio.h>
 
 // TODO: Pass the descriptors using const * as well as it will be good later on when desiging ABI for C#
+// TODO: see if you can remove the push constant size from pipeline as we are now using the CREN_PUSH_CONSTANT_SIZE macro
 
 static bool create_vulkan_surface(void *instance, void *window, void *data, void **surface) {
   (void)data;
@@ -41,8 +43,10 @@ typedef struct Vertex {
 } Vertex;
 
 typedef struct PushConstants {
-  uint64_t vertices;
-} PushConstants;
+  uint64_t vertices; // BDA, read by the scene shader
+  uint32_t texture;  // bindless image slot, read by the post shader
+  uint32_t sampler;  // bindless sampler slot
+} PushConstants;     // 16 bytes
 
 Vertex vertices[3] = {
     {{0.0f, -0.5f, 0.5f}, {1, 0, 0}},
@@ -50,6 +54,53 @@ Vertex vertices[3] = {
     {{-0.5f, 0.5f, 0.5f}, {0, 0, 1}},
 };
 uint32_t indices[3] = {0, 1, 2};
+
+// HDR helper
+typedef struct HDRTarget {
+  cREN_Image *image;
+  cREN_ImageView *view;
+  uint32_t slot;
+} HDRTarget;
+
+static bool HDR_create(cREN_Context *ctx, cREN_Device *device, cREN_Allocator *allocator, cREN_Bindless *bindless, uint32_t w, uint32_t h, HDRTarget *out) {
+  cREN_ImageDesc desc = {
+      .width = w,
+      .height = h,
+      .format = CREN_FORMAT_RGBA16_FLOAT,
+      .usage = CREN_IMAGE_COLOR_ATTACHMENT | CREN_IMAGE_SAMPLED,
+  };
+  out->image = cREN_image_create(ctx, device, allocator, &desc);
+  if (out->image == NULL) {
+    return false;
+  }
+
+  cREN_ImageViewDesc view_desc = {.type = CREN_VIEW_2D};
+  out->view = cREN_image_view_create(ctx, device, out->image, &view_desc);
+  out->slot = out->view != NULL ? cREN_bindless_add_image(bindless, out->view) : CREN_BINDLESS_INVALID;
+  if (out->slot == CREN_BINDLESS_INVALID) {
+    cREN_image_view_destroy(ctx, device, out->view); // NULL-safe
+    cREN_image_destroy(ctx, device, allocator, out->image);
+    *out = (HDRTarget){0};
+    return false;
+  }
+  return true;
+}
+
+static void HDR_destroy(cREN_Context *ctx, cREN_Device *device, cREN_Allocator *allocator, cREN_Bindless *bindless, HDRTarget *hdr) {
+  if (hdr->image == NULL) {
+    return;
+  }
+  cREN_bindless_free_image(bindless, CREN_VIEW_2D, hdr->slot);
+  cREN_image_view_destroy(ctx, device, hdr->view);
+  cREN_image_destroy(ctx, device, allocator, hdr->image);
+  *hdr = (HDRTarget){0};
+}
+
+static void pass_no_op(cREN_CmdBuffer *cmd, cREN_Graph *graph, void *user) {
+  (void)cmd;
+  (void)graph;
+  (void)user;
+}
 
 int main() {
   SDL_Init(SDL_INIT_VIDEO);
@@ -82,7 +133,8 @@ int main() {
   cREN_Bindless *bindless = cREN_bindless_init(ctx, device, &bl_desc);
 
   // shader
-  cREN_Shader *shader = cREN_shader_load(ctx, device, CREN_SHADER_DIR "/triangle.spv");
+  cREN_Shader *default_shader = cREN_shader_load(ctx, device, CREN_SHADER_DIR "/triangle.spv");
+  cREN_Shader *post_shader = cREN_shader_load(ctx, device, CREN_SHADER_DIR "/post.spv");
 
   // frames
   cREN_FramesDesc frames_desc = {
@@ -127,55 +179,81 @@ int main() {
   cREN_buffer_upload(ctx, device, allocator, vertex_buffer, 0, vertices, sizeof(vertices));
   cREN_buffer_upload(ctx, device, allocator, index_buffer, 0, indices, sizeof(indices));
 
-  PushConstants push = {.vertices = cREN_buffer_address(vertex_buffer)};
+  // create HDR target
+  HDRTarget hdr = {0};
+  HDR_create(ctx, device, allocator, bindless, sw, sh, &hdr);
+  cREN_SamplerDesc linear_desc = {
+      .min_filter = CREN_FILTER_LINEAR,
+      .mag_filter = CREN_FILTER_LINEAR,
+      .mip_filter = CREN_FILTER_NEAREST,
+      .address_u = CREN_ADDRESS_CLAMP_TO_EDGE,
+      .address_v = CREN_ADDRESS_CLAMP_TO_EDGE,
+      .address_w = CREN_ADDRESS_CLAMP_TO_EDGE,
+  };
+  cREN_Sampler *linear_clamp = cREN_sampler_create(ctx, device, &linear_desc);
 
-  // pipeline
-  cREN_Format color_format = cREN_swapchain_format(swapchain);
-  cREN_PipelineDesc pipeline_desc = {
-      .shader = shader,
+  // push constants
+  PushConstants push = {
+      .vertices = cREN_buffer_address(vertex_buffer),
+      .texture = hdr.slot, // updated again after every resize
+      .sampler = cREN_bindless_add_sampler(bindless, linear_clamp),
+  };
+
+  // pipelines
+  cREN_Format hdr_format = CREN_FORMAT_RGBA16_FLOAT;
+  cREN_PipelineDesc scene_desc = {
+      .shader = default_shader,
       .vertex_entry = "vsMain",
       .frag_entry = "fsMain",
-      .color_formats = &color_format,
+      .color_formats = &hdr_format,
       .color_format_count = 1,
       .depth_format = CREN_FORMAT_D32_FLOAT,
       .depth_test = true,
       .depth_write = true,
-      .push_constant_size = sizeof(PushConstants),
+      .bindless = bindless,
   };
-  cREN_Pipeline *pipeline = cREN_pipeline_init(ctx, device, &pipeline_desc);
+  cREN_Pipeline *scene_pipeline = cREN_pipeline_init(ctx, device, &scene_desc);
 
-  // sky
-  cREN_ImageDesc sky_desc = {
-      .width = 256,
-      .height = 256,
-      .format = CREN_FORMAT_RGBA8_UNORM,
-      .usage = CREN_IMAGE_SAMPLED | CREN_IMAGE_TRANSFER_DST,
-      .type = CREN_IMAGE_TYPE_CUBE,
-      .mip_levels = CREN_MAX_MIP_LEVELS,
+  cREN_Format swap_format = cREN_swapchain_format(swapchain);
+  cREN_PipelineDesc post_desc = {
+      .shader = post_shader,
+      .vertex_entry = "vsMain",
+      .frag_entry = "fsMain",
+      .color_formats = &swap_format,
+      .color_format_count = 1,
+      .depth_format = CREN_FORMAT_UNDEFINED,
+      .bindless = bindless,
   };
-  cREN_Image *sky = cREN_image_create(ctx, device, allocator, &sky_desc);
+  cREN_Pipeline *post_pipeline = cREN_pipeline_init(ctx, device, &post_desc);
 
-  cREN_ImageViewDesc face_desc = {.type = CREN_VIEW_2D, .base_mip = 0, .mip_count = 1, .base_layer = 2, .layer_count = 1};
-  cREN_ImageView *face = cREN_image_view_create(ctx, device, sky, &face_desc);
-
-  cREN_ImageViewDesc cube_desc = {.type = CREN_VIEW_CUBE}; // all mips, all 6 faces
-  cREN_ImageView *cube_view = cREN_image_view_create(ctx, device, sky, &cube_desc);
-
-  cREN_SamplerDesc sampler_desc = {
-      .min_filter = CREN_FILTER_LINEAR,
-      .mag_filter = CREN_FILTER_LINEAR,
-      .mip_filter = CREN_FILTER_LINEAR,
-      .address_u = CREN_ADDRESS_REPEAT,
-      .address_v = CREN_ADDRESS_REPEAT,
-      .address_w = CREN_ADDRESS_REPEAT,
-      .max_anisotropy = 16.0f,
+  // render graph
+  cREN_Graph *graph = cREN_graph_create(ctx, device, allocator, bindless);
+  cREN_GraphImage backbuffer = cREN_graph_import_swapchain(graph, swapchain);
+  cREN_GraphImageDesc hdr_desc = {
+      .name = "hdr",
+      .format = CREN_FORMAT_RGBA16_FLOAT,
+      .size_mode = CREN_GRAPH_SIZE_RELATIVE,
+      .relative_to = backbuffer,
   };
-  cREN_Sampler *sampler = cREN_sampler_create(ctx, device, &sampler_desc);
+  cREN_GraphImage hdr_img = cREN_graph_create_image(graph, &hdr_desc);
 
-  uint32_t cube_slot = cREN_bindless_add_image(bindless, cube_view);
-  uint32_t face_slot = cREN_bindless_add_image(bindless, face); // 2D table, so slot 0
-  uint32_t smp_slot = cREN_bindless_add_sampler(bindless, sampler);
-  fprintf(stderr, "[cREN] bindless: cube %u, face %u, sampler %u\n", cube_slot, face_slot, smp_slot);
+  cREN_GraphImageDesc depth_desc2 = {
+      .name = "depth",
+      .format = CREN_FORMAT_D32_FLOAT,
+      .size_mode = CREN_GRAPH_SIZE_RELATIVE,
+      .relative_to = backbuffer,
+  };
+  cREN_GraphImage depth_img = cREN_graph_create_image(graph, &depth_desc2);
+
+  cREN_GraphPass scene = cREN_graph_pass_add(graph, "scene", pass_no_op, NULL);
+  cREN_graph_pass_write_color(graph, scene, hdr_img, CREN_LOAD_CLEAR, (cREN_ClearColor){0.1f, 0.2f, 0.4f, 1.0f});
+  cREN_graph_pass_write_depth(graph, scene, depth_img, CREN_LOAD_CLEAR, 1.0f);
+
+  cREN_GraphPass post = cREN_graph_pass_add(graph, "post", pass_no_op, NULL);
+  cREN_graph_pass_read_sampled(graph, post, hdr_img);
+  cREN_graph_pass_write_color(graph, post, backbuffer, CREN_LOAD_DONT_CARE, (cREN_ClearColor){0});
+
+  cREN_graph_dump(graph);
 
   bool running = true;
 
@@ -201,38 +279,51 @@ int main() {
           cREN_swapchain_extent(swapchain, &sw, &sh);
           if (sw != cREN_image_width(depth) || sh != cREN_image_height(depth)) {
             cREN_image_destroy(ctx, device, allocator, depth);
+            HDR_destroy(ctx, device, allocator, bindless, &hdr);
+
             depth_desc.width = sw;
             depth_desc.height = sh;
             depth = cREN_image_create(ctx, device, allocator, &depth_desc);
+            if (depth == NULL || !HDR_create(ctx, device, allocator, bindless, sw, sh, &hdr)) {
+              running = false;
+              continue;
+            }
+            push.texture = hdr.slot; // the slot may change, so never cache it elsewhere
           }
         }
       }
     }
 
     if (cREN_frame_begin(device, frames)) {
-      cREN_frame_acquire(device, frames, swapchain);
+      const bool have_image = cREN_frame_acquire(device, frames, swapchain) == CREN_FRAME_OK;
 
-      cREN_CmdBuffer *cmd = cREN_cmd_begin(frames);
+      cREN_CmdBuffer *cmd = have_image ? cREN_cmd_begin(frames) : NULL;
       if (cmd != NULL) {
-        // can be moved outside of loop since this is just plain data
-        cREN_ColorAttachment color = {
-            .swapchain = swapchain,
-            .load = CREN_LOAD_CLEAR,
-            .clear = {0.1f, 0.2f, 0.4f, 1.0f},
-        };
-        cREN_DepthAttachment depth_att = {
-            .image = depth,
-            .load = CREN_LOAD_CLEAR,
-            .clear_depth = 1.0f,
-        };
-        cREN_RenderingDesc pass = {.colors = &color, .color_count = 1, .depth = &depth_att};
+        cREN_ColorAttachment hdr_color = {.image = hdr.image, .load = CREN_LOAD_CLEAR, .clear = {0.1f, 0.2f, 0.4f, 1.0f}};
+        cREN_DepthAttachment depth_att = {.image = depth, .load = CREN_LOAD_CLEAR, .clear_depth = 1.0f};
+        cREN_RenderingDesc scene_pass = {.colors = &hdr_color, .color_count = 1, .depth = &depth_att};
 
-        if (cREN_cmd_begin_rendering(cmd, frames, &pass)) {
-          cREN_cmd_bind_pipeline(cmd, pipeline);
-          cREN_cmd_set_viewport_scissor(cmd, swapchain);
-          cREN_cmd_push_constants(cmd, pipeline, &push, sizeof(push));
+        cREN_ColorAttachment post_color = {.swapchain = swapchain, .load = CREN_LOAD_DONT_CARE};
+        cREN_RenderingDesc post_pass = {.colors = &post_color, .color_count = 1};
+
+        // scene -> HDR
+        if (cREN_cmd_begin_rendering(cmd, frames, &scene_pass)) {
+          cREN_cmd_bind_pipeline(cmd, scene_pipeline);
+          cREN_cmd_bind_bindless(cmd, scene_pipeline, bindless); // once per frame, the post layout is identical
+          cREN_cmd_set_viewport_scissor_size(cmd, cREN_image_width(hdr.image), cREN_image_height(hdr.image));
+          cREN_cmd_push_constants(cmd, scene_pipeline, &push, sizeof(push));
           cREN_cmd_bind_index_buffer(cmd, index_buffer, 0);
           cREN_cmd_draw_indexed(cmd, 3, 1, 0, 0, 0);
+          cREN_cmd_end_rendering(cmd);
+          cREN_cmd_transition_image(cmd, hdr.image, CREN_IMAGE_STATE_SHADER_READ);
+        }
+
+        // HDR -> tonemap -> swapchain
+        if (cREN_cmd_begin_rendering(cmd, frames, &post_pass)) {
+          cREN_cmd_bind_pipeline(cmd, post_pipeline);
+          cREN_cmd_set_viewport_scissor(cmd, swapchain);
+          cREN_cmd_push_constants(cmd, post_pipeline, &push, sizeof(push));
+          cREN_cmd_draw(cmd, 3, 1, 0, 0);
           cREN_cmd_end_rendering(cmd);
           cREN_cmd_prepare_present(cmd, frames, swapchain);
         }
@@ -245,18 +336,19 @@ int main() {
 
   // clean-up
   cREN_frames_deinit(ctx, device, frames);
-  cREN_image_view_destroy(ctx, device, face);
-  cREN_image_view_destroy(ctx, device, cube_view);
-  cREN_image_destroy(ctx, device, allocator, sky);
-  cREN_sampler_destroy(ctx, device, sampler);
+  cREN_graph_destroy(graph);
+  HDR_destroy(ctx, device, allocator, bindless, &hdr);
   cREN_image_destroy(ctx, device, allocator, depth);
   cREN_buffer_destroy(ctx, allocator, index_buffer);
   cREN_buffer_destroy(ctx, allocator, vertex_buffer);
-  cREN_pipeline_deinit(ctx, device, pipeline);
+  cREN_pipeline_deinit(ctx, device, scene_pipeline);
+  cREN_pipeline_deinit(ctx, device, post_pipeline);
+  cREN_sampler_destroy(ctx, device, linear_clamp);
   cREN_swapchain_deinit(ctx, device, swapchain);
   cREN_surface_deinit(ctx, surface);
   cREN_allocator_deinit(allocator);
-  cREN_shader_deinit(ctx, device, shader);
+  cREN_shader_deinit(ctx, device, default_shader);
+  cREN_shader_deinit(ctx, device, post_shader);
   cREN_bindless_deinit(ctx, device, bindless);
   cREN_device_deinit(device);
   cREN_instance_deinit(ctx);

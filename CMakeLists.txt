@@ -88,17 +88,27 @@ endif()
 set(CREN_SHADER_SRC "${CMAKE_SOURCE_DIR}/shaders/triangle.slang")
 set(CREN_SHADER_OUT "${CMAKE_BINARY_DIR}/shaders/triangle.spv")
 
-add_custom_command(
-    OUTPUT "${CREN_SHADER_OUT}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
-    COMMAND ${SLANGC} "${CREN_SHADER_SRC}" -target spirv -profile spirv_1_5 -o "${CREN_SHADER_OUT}"
-    DEPENDS "${CREN_SHADER_SRC}"
-    COMMENT "Compiling triangle.slang"
-    VERBATIM
-)
-add_custom_target(cREN_shaders DEPENDS "${CREN_SHADER_OUT}")
+# Shader sources
+set(CREN_SHADERS triangle post)
+set(CREN_SHADER_OUTPUTS "")
+
+foreach(name IN LISTS CREN_SHADERS)
+    set(src "${CMAKE_SOURCE_DIR}/shaders/${name}.slang")
+    set(out "${CMAKE_BINARY_DIR}/shaders/${name}.spv")
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
+        COMMAND ${SLANGC} "${src}" -target spirv -profile spirv_1_5 -fvk-use-scalar-layout -o "${out}"
+        DEPENDS "${src}"
+        COMMENT "Compiling ${name}.slang"
+        VERBATIM
+    )
+    list(APPEND CREN_SHADER_OUTPUTS "${out}")
+endforeach()
+
+add_custom_target(cREN_shaders DEPENDS ${CREN_SHADER_OUTPUTS})
 add_dependencies(cREN cREN_shaders)
 
 # if(MSVC)
-#     target_compile_options(cREN PRIVATE /W4 /we4013)
+# target_compile_options(cREN PRIVATE /W4 /we4013)
 # endif()

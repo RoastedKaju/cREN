@@ -286,7 +286,7 @@ void cREN_cmd_draw(cREN_CmdBuffer *cmd, uint32_t vertex_count, uint32_t instance
 }
 
 void cREN_cmd_push_constants(cREN_CmdBuffer *cmd, const cREN_Pipeline *pipeline, const void *data, uint32_t size) {
-  if (cmd == NULL || pipeline == NULL || data == NULL || size == 0) {
+  if (cmd == NULL || pipeline == NULL || data == NULL || size == 0 || size > CREN_PUSH_CONSTANT_SIZE) {
     return;
   }
   vkCmdPushConstants(cmd->handle, pipeline->layout, pipeline->push_stages, 0, size, data);

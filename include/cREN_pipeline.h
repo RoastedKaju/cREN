@@ -20,7 +20,6 @@ typedef struct cREN_PipelineDesc {
   cREN_Format depth_format; // UNDEFINED = no depth attachment
   bool depth_test;
   bool depth_write;
-  uint32_t push_constant_size;   // 128 max
   const cREN_Bindless *bindless; // optional, becomes set 0 of the layout
 } cREN_PipelineDesc;
 

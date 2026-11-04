@@ -4,6 +4,7 @@
 
 #define CREN_MAX_MIP_LEVELS UINT32_MAX
 #define CREN_BINDLESS_INVALID UINT32_MAX
+#define CREN_PUSH_CONSTANT_SIZE 128
 
 /* function pointer type for surface creation */
 typedef bool (*cREN_SurfaceCreateFn)(void *renderer_instance,
@@ -126,3 +127,8 @@ typedef enum cREN_BindlessTableType {
   CREN_TABLE_SAMPLER,
   CREN_TABLE_COUNT, // one binding per table
 } cREN_BindlessTableType;
+
+typedef enum cREN_GraphSizeMode {
+  CREN_GRAPH_SIZE_ABSOLUTE = 0, // width and height are used as given
+  CREN_GRAPH_SIZE_RELATIVE,     // follows an imported swapchain, rebuilt on resize
+} cREN_GraphSizeMode;
