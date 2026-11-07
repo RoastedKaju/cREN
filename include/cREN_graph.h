@@ -51,3 +51,13 @@ bool cREN_graph_pass_write_depth(cREN_Graph *graph, cREN_GraphPass pass, cREN_Gr
 bool cREN_graph_pass_read_sampled(cREN_Graph *graph, cREN_GraphPass pass, cREN_GraphImage image);
 
 void cREN_graph_dump(const cREN_Graph *graph);
+
+bool cREN_graph_compile(cREN_Graph *graph);
+
+bool cREN_graph_needs_compile(const cREN_Graph *graph);
+
+bool cREN_graph_execute(cREN_Graph *graph, cREN_CmdBuffer *cmd, cREN_Frames *frames);
+
+cREN_Image *cREN_graph_get_image(const cREN_Graph *graph, cREN_GraphImage image);
+
+uint32_t cREN_graph_get_bindless(const cREN_Graph *graph, cREN_GraphImage image);

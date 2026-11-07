@@ -41,3 +41,7 @@ VSOutput vsMain(uint vertex_id: SV_VertexID) {
 float4 fsMain(VSOutput input) : SV_Target {
   return float4(input.color, 1.0);
 }
+
+[shader("fragment")]
+void fsDepth() {
+}
